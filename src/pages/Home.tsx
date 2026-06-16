@@ -19,6 +19,12 @@ const cards = [
     title: 'Image → Pattern',
     desc: 'Upload a photo, pixelate it to a crochet grid, snap to real yarn colors, then follow it row by row.',
   },
+  {
+    to: '/amigurumi',
+    emoji: '🧸',
+    title: 'Amigurumi Generator',
+    desc: 'Compose a 3D figure from in-the-round shapes, preview how the parts fit in space, and get the round-by-round pattern.',
+  },
 ]
 
 export default function Home() {
@@ -27,8 +33,8 @@ export default function Home() {
       <section className="rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 px-6 py-10 text-white shadow-sm">
         <h1 className="text-3xl font-bold sm:text-4xl">Design & visualize crochet patterns</h1>
         <p className="mt-3 max-w-2xl text-rose-50">
-          A little studio for flat color work: size your project, draw a chart from
-          scratch, or turn a photo into a pixel pattern you can crochet stitch by stitch.
+          A little studio for crochet: size your project, draw a chart from scratch,
+          turn a photo into a pixel pattern, or design a 3D amigurumi worked in the round.
         </p>
       </section>
 
