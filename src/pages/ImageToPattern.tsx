@@ -199,7 +199,11 @@ export default function ImageToPattern() {
                 href={img.src}
                 target="_blank"
                 rel="noreferrer"
-                onClick={() => setShowFileName(true)}
+                onClick={(e) => {
+                  e.preventDefault()
+                  setShowFileName(true)
+                  window.open(img.src, '_blank', 'noopener')
+                }}
                 className="text-rose-600 underline hover:text-rose-700"
               >
                 Local Image File
