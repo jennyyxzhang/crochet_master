@@ -1,14 +1,20 @@
+import { lazy, Suspense } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
 import Home from './pages/Home'
 import Calculator from './pages/Calculator'
 import GridDesigner from './pages/GridDesigner'
 import ImageToPattern from './pages/ImageToPattern'
 
+// The amigurumi tool pulls in Three.js, so load it on demand to keep the
+// initial bundle small for the other tools.
+const Amigurumi = lazy(() => import('./pages/Amigurumi'))
+
 const navItems = [
   { to: '/', label: 'Home', end: true },
   { to: '/calculator', label: 'Size Calculator' },
   { to: '/designer', label: 'Grid Designer' },
   { to: '/image', label: 'Image → Pattern' },
+  { to: '/amigurumi', label: 'Amigurumi' },
 ]
 
 export default function App() {
@@ -47,6 +53,14 @@ export default function App() {
           <Route path="/calculator" element={<Calculator />} />
           <Route path="/designer" element={<GridDesigner />} />
           <Route path="/image" element={<ImageToPattern />} />
+          <Route
+            path="/amigurumi"
+            element={
+              <Suspense fallback={<div className="py-20 text-center text-sm text-slate-400">Loading 3D tools…</div>}>
+                <Amigurumi />
+              </Suspense>
+            }
+          />
         </Routes>
       </main>
 
