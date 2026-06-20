@@ -17,7 +17,7 @@ const cards = [
     to: '/image',
     emoji: '🖼️',
     title: 'Image → Pattern',
-    desc: 'Upload a photo, pixelate it to a crochet grid, snap to real yarn colors, then follow it row by row.',
+    desc: 'Upload a photo, lay an adjustable grid over it with the original colors kept, then follow it row by row.',
   },
 ]
 
