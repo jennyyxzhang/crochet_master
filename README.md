@@ -17,10 +17,11 @@ color palette you can edit, undo/redo, live stitch counts, finished-size
 readout, and PNG/PDF export. Patterns save to your browser.
 
 ### 🖼️ Image → Pattern
-Upload a photo, pixelate it to a crochet grid (color count is reduced with
-median-cut quantization, and can snap to a real-yarn palette), then follow it
-**row by row** with a guided highlighter that respects the back-and-forth
-reading direction of flat crochet.
+Upload a photo and lay an adjustable grid over it — set the number of stitches
+wide and rows tall independently. The original photo is kept (its saturation is
+dropped 20% so the black grid stands out), and you can follow it **row by row**
+with a guided highlighter that respects the back-and-forth reading direction of
+flat crochet.
 
 ## A note on gauge & proportions
 
