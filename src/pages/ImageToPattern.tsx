@@ -128,18 +128,23 @@ export default function ImageToPattern() {
     })
   }, [render, showNumbers, following, currentRow])
 
-  useEffect(() => {
+  // Arrow keys only move the highlight while the canvas itself is focused, and
+  // we preventDefault so they don't also scroll the page.
+  const onCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (!following) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
-        setCurrentRow((r) => Math.min(rows - 1, r + 1))
-      } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
-        setCurrentRow((r) => Math.max(0, r - 1))
-      }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      setCurrentRow((r) => Math.min(rows - 1, r + 1))
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setCurrentRow((r) => Math.max(0, r - 1))
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [following, rows])
+  }
+
+  // Focus the canvas when entering follow mode so the arrow keys work right away.
+  useEffect(() => {
+    if (following) canvasRef.current?.focus()
+  }, [following])
 
   const exportPNG = () => {
     if (!img) return
@@ -309,7 +314,7 @@ export default function ImageToPattern() {
                 >
                   Next row →
                 </button>
-                <span className="text-xs text-emerald-600">Tip: use arrow keys</span>
+                <span className="text-xs text-emerald-600">Tip: click the image, then use arrow keys</span>
               </div>
             </section>
           )}
@@ -317,7 +322,12 @@ export default function ImageToPattern() {
           {img && (
             <div className="overflow-auto rounded-xl border border-slate-200 bg-white p-3">
               <div className="inline-block">
-                <canvas ref={canvasRef} />
+                <canvas
+                  ref={canvasRef}
+                  tabIndex={following ? 0 : -1}
+                  onKeyDown={onCanvasKeyDown}
+                  className={`rounded-sm outline-none ${following ? 'cursor-pointer ring-emerald-500 focus:ring-2 focus:ring-offset-2' : ''}`}
+                />
               </div>
             </div>
           )}
