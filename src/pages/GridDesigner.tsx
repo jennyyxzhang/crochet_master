@@ -6,14 +6,13 @@ import {
   resizePattern,
   floodFill,
   colorCounts,
-  totalStitches,
   savePattern,
   EMPTY,
   MAX_DIM,
   type Pattern,
 } from '../lib/grid'
 import { DEFAULT_PALETTE, YARN_PALETTE, contrastText } from '../lib/palette'
-import { cellAspect, sizeFromCounts, fromInches, type Unit } from '../lib/gauge'
+import { cellAspect } from '../lib/gauge'
 import { exportPNG, exportPDF } from '../lib/export'
 
 type Tool = 'paint' | 'fill' | 'erase' | 'eyedropper'
@@ -45,8 +44,10 @@ export default function GridDesigner() {
   const [selected, setSelected] = useState(1)
   const [cellSize, setCellSize] = useState(18)
   const [trueProportions, setTrueProportions] = useState(false)
-  const [unit, setUnit] = useState<Unit>('in')
   const [saved, setSaved] = useState(false)
+  const [following, setFollowing] = useState(false)
+  const [currentRow, setCurrentRow] = useState(0) // counted from the bottom
+  const followRef = useRef<HTMLDivElement>(null)
 
   const [past, setPast] = useState<number[][][]>([])
   const [future, setFuture] = useState<number[][][]>([])
@@ -181,11 +182,36 @@ export default function GridDesigner() {
     setSaved(true)
   }
 
+  // Clamp the highlighted row to the current grid height (handles resizes).
+  const followRow = Math.max(0, Math.min(currentRow, pattern.rows - 1))
+
+  // Arrow keys only move the highlight while the grid is focused, and we
+  // preventDefault so they don't also scroll the page.
+  const onFollowKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!following) return
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      setCurrentRow(Math.min(pattern.rows - 1, followRow + 1))
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setCurrentRow(Math.max(0, followRow - 1))
+    }
+  }
+
+  const toggleFollow = () => {
+    setFollowing((f) => {
+      if (!f) setCurrentRow(0)
+      return !f
+    })
+  }
+
+  // Focus the grid when entering follow mode so the arrow keys work right away.
+  useEffect(() => {
+    if (following) followRef.current?.focus()
+  }, [following])
+
   const aspect = trueProportions ? cellAspect(pattern.gauge) : 1
   const counts = colorCounts(pattern)
-  const total = totalStitches(pattern)
-  const size = sizeFromCounts(pattern.cols, pattern.rows, pattern.gauge)
-  const fmt = (inches: number) => fromInches(inches, unit).toFixed(1)
 
   return (
     <div className="space-y-4">
@@ -303,41 +329,12 @@ export default function GridDesigner() {
               <input type="checkbox" checked={trueProportions} onChange={(e) => setTrueProportions(e.target.checked)} />
               <span className="text-slate-600">True stitch proportions</span>
             </label>
-          </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
-            <h3 className="font-semibold text-slate-700">Finished size</h3>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <label>
-                <span className="text-xs text-slate-500">sts / 4in</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={pattern.gauge.stsPer4in}
-                  onChange={(e) => setPattern((p) => ({ ...p, gauge: { ...p.gauge, stsPer4in: parseFloat(e.target.value) || 1 } }))}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1"
-                />
-              </label>
-              <label>
-                <span className="text-xs text-slate-500">rows / 4in</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={pattern.gauge.rowsPer4in}
-                  onChange={(e) => setPattern((p) => ({ ...p, gauge: { ...p.gauge, rowsPer4in: parseFloat(e.target.value) || 1 } }))}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1"
-                />
-              </label>
-            </div>
-            <div className="mt-2 flex items-center justify-between">
-              <p className="text-lg font-semibold text-slate-800">
-                {fmt(size.widthIn)} × {fmt(size.heightIn)} {unit}
-              </p>
-              <button onClick={() => setUnit(unit === 'in' ? 'cm' : 'in')} className="rounded border border-slate-200 px-2 py-0.5 text-xs">
-                {unit}
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-slate-400">{total} stitches placed</p>
+            <button
+              onClick={toggleFollow}
+              className={`mt-3 w-full rounded-md py-2 font-medium ${following ? 'bg-slate-200 text-slate-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+            >
+              {following ? 'Exit follow mode' : '▶ Follow row by row'}
+            </button>
           </section>
 
           {counts.length > 0 && (
@@ -359,18 +356,55 @@ export default function GridDesigner() {
         </aside>
 
         {/* Canvas */}
-        <div className="overflow-auto rounded-xl border border-slate-200 bg-white p-3">
-          <div className="inline-block">
-            <GridCanvas
-              pattern={pattern}
-              cellSize={cellSize}
-              aspect={aspect}
-              showRowNumbers
-              interactive
-              onPaintStart={handleStart}
-              onPaint={handlePaint}
-              onPaintEnd={handleEnd}
-            />
+        <div className="space-y-4">
+          {following && (
+            <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-sm text-emerald-700">
+                Row {followRow + 1} of {pattern.rows} ·{' '}
+                <span className="font-medium">
+                  {followRow % 2 === 0 ? 'read right → left ←' : 'read left → right →'}
+                </span>
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentRow(Math.max(0, followRow - 1))}
+                  disabled={followRow === 0}
+                  className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-sm disabled:opacity-40"
+                >
+                  ← Prev row
+                </button>
+                <button
+                  onClick={() => setCurrentRow(Math.min(pattern.rows - 1, followRow + 1))}
+                  disabled={followRow >= pattern.rows - 1}
+                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  Next row →
+                </button>
+                <span className="text-xs text-emerald-600">
+                  Editing is locked · click the grid, then use arrow keys
+                </span>
+              </div>
+            </section>
+          )}
+          <div
+            ref={followRef}
+            tabIndex={following ? 0 : -1}
+            onKeyDown={onFollowKeyDown}
+            className={`overflow-auto rounded-xl border bg-white p-3 outline-none ${following ? 'cursor-pointer border-emerald-300 ring-emerald-500 focus:ring-2 focus:ring-offset-2' : 'border-slate-200'}`}
+          >
+            <div className="inline-block">
+              <GridCanvas
+                pattern={pattern}
+                cellSize={cellSize}
+                aspect={aspect}
+                showRowNumbers
+                interactive={!following}
+                highlightRowFromBottom={following ? followRow : null}
+                onPaintStart={handleStart}
+                onPaint={handlePaint}
+                onPaintEnd={handleEnd}
+              />
+            </div>
           </div>
         </div>
       </div>
