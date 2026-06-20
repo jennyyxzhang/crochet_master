@@ -20,6 +20,7 @@ export default function ImageToPattern() {
 
   const [following, setFollowing] = useState(false)
   const [currentRow, setCurrentRow] = useState(0) // counted from the bottom
+  const [showFileName, setShowFileName] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -32,6 +33,7 @@ export default function ImageToPattern() {
     setFileName(file.name)
     setFollowing(false)
     setCurrentRow(0)
+    setShowFileName(false)
     // Seed the row count so the initial grid roughly matches the image shape.
     const aspect = image.naturalWidth / image.naturalHeight
     setRows(Math.max(1, Math.round(40 / aspect)))
@@ -190,6 +192,23 @@ export default function ImageToPattern() {
               {fileName ? `📷 ${fileName}` : 'Click to choose an image'}
             </button>
           </section>
+
+          {img && (
+            <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+              <a
+                href={img.src}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setShowFileName(true)}
+                className="text-rose-600 underline hover:text-rose-700"
+              >
+                Local Image File
+              </a>
+              {showFileName && (
+                <p className="mt-2 text-xs text-slate-500">{fileName}</p>
+              )}
+            </section>
+          )}
 
           {img && (
             <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
