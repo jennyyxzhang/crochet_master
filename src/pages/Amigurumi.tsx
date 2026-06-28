@@ -364,26 +364,44 @@ function ShapeControls({
   const unitLabel = unit === 'in' ? 'in' : 'cm'
   const committedDia = fromInches(diameterFromWidest(shape.maxStitches, gauge), unit)
 
-  // The diameter field keeps its own text state so it can be typed into freely;
-  // it derives the widest stitch count as you type and only re-syncs from the
-  // model when the widest count or unit changes elsewhere (widest input, preset).
+  // Widest sts and diameter are two views of the same value — edit either one.
+  // Each field keeps its own text state so it can be typed into freely (no
+  // per-keystroke clamping); editing one updates the other live. We only
+  // re-sync both from the model when the value/unit changes elsewhere
+  // (e.g. loading a preset).
+  const [widestText, setWidestText] = useState(() => String(shape.maxStitches))
   const [diaText, setDiaText] = useState(() => committedDia.toFixed(2))
   const syncRef = useRef({ widest: shape.maxStitches, unit })
   useEffect(() => {
     const s = syncRef.current
     if (s.widest !== shape.maxStitches || s.unit !== unit) {
       syncRef.current = { widest: shape.maxStitches, unit }
+      setWidestText(String(shape.maxStitches))
       setDiaText(committedDia.toFixed(2))
     }
   }, [shape.maxStitches, unit, committedDia])
+
+  function commitWidest(w: number) {
+    syncRef.current = { widest: w, unit }
+    onShape({ maxStitches: w })
+  }
+
+  function onWidest(text: string) {
+    setWidestText(text)
+    const v = parseInt(text, 10)
+    if (Number.isFinite(v) && v >= shape.start) {
+      setDiaText(fromInches(diameterFromWidest(v, gauge), unit).toFixed(2))
+      commitWidest(v)
+    }
+  }
 
   function onDiameter(text: string) {
     setDiaText(text)
     const v = parseFloat(text)
     if (Number.isFinite(v) && v > 0) {
       const w = widestFromDiameter(toInches(v, unit), gauge)
-      syncRef.current = { widest: w, unit }
-      onShape({ maxStitches: w })
+      setWidestText(String(w))
+      commitWidest(w)
     }
   }
 
@@ -392,14 +410,16 @@ function ShapeControls({
       <Field label="Start sts (magic ring)">
         <NumberInput value={shape.start} min={3} max={12} onChange={(v) => onShape({ start: v })} />
       </Field>
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Size — set widest count or diameter</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Size — edit either widest count or diameter</p>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Widest sts">
-          <NumberInput
-            value={shape.maxStitches}
+          <input
+            type="number"
+            value={widestText}
             min={shape.start}
-            max={200}
-            onChange={(v) => onShape({ maxStitches: v })}
+            step={1}
+            onChange={(e) => onWidest(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5"
           />
         </Field>
         <Field label={`Diameter (${unitLabel})`}>
