@@ -35,7 +35,7 @@ function placements(part: AmiPart, sw: number, rh: number): Placement[] {
 
 function PartMesh({ part, offset, sw, rh }: { part: AmiPart; offset: [number, number, number]; sw: number; rh: number }) {
   const geometry = useMemo(() => {
-    const profile = shapeProfile(part.shape)
+    const profile = shapeProfile(part.shape, sw / rh)
     const pts = latheProfile(profile, sw, rh)
     const v: THREE.Vector2[] = []
     // close the magic-ring base
@@ -65,7 +65,7 @@ export default function FigureViewer({ figure, height = 460 }: { figure: Figure;
     let maxY = 1
     let maxR = 1
     for (const part of figure.parts) {
-      const profile = shapeProfile(part.shape)
+      const profile = shapeProfile(part.shape, sw / rh)
       const top = part.position.y * rh + profile.length * rh
       maxY = Math.max(maxY, top)
       const r = (Math.max(...profile) * sw) / (2 * Math.PI) + Math.abs(part.position.x) * sw

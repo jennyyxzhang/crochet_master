@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import FigureViewer from '../components/FigureViewer'
 import {
   FIGURE_PRESETS,
@@ -12,7 +12,6 @@ import {
   shapeProfile,
   type AmiPart,
   type Figure,
-  type ShapeKind,
   type ShapeParams,
 } from '../lib/amigurumi'
 import { exportAmigurumiPDF, exportAmigurumiText, assemblyNotes } from '../lib/export'
@@ -20,17 +19,14 @@ import {
   YARN_WEIGHTS,
   typicalGauge,
   fromInches,
+  toInches,
+  cellAspect,
+  widestFromDiameter,
+  diameterFromWidest,
   SWATCH_INCHES,
+  type Gauge,
   type Unit,
 } from '../lib/gauge'
-
-const SHAPES: { kind: ShapeKind; label: string }[] = [
-  { kind: 'ball', label: 'Ball / sphere' },
-  { kind: 'teardrop', label: 'Teardrop (egg)' },
-  { kind: 'cylinder', label: 'Cylinder / limb' },
-  { kind: 'cone', label: 'Cone' },
-  { kind: 'dome', label: 'Dome (half ball)' },
-]
 
 function num(value: string, fallback = 0): number {
   const n = parseFloat(value)
@@ -108,8 +104,9 @@ export default function Amigurumi() {
     const rh = SWATCH_INCHES / gauge.rowsPer4in
     let top = 0
     let maxWidthIn = 0
+    const aspect = cellAspect(gauge)
     for (const part of figure.parts) {
-      const profile = shapeProfile(part.shape)
+      const profile = shapeProfile(part.shape, aspect)
       top = Math.max(top, part.position.y * rh + profile.length * rh)
       const diaIn = (Math.max(...profile) * sw) / Math.PI
       maxWidthIn = Math.max(maxWidthIn, diaIn)
@@ -118,8 +115,8 @@ export default function Amigurumi() {
   }, [figure.parts, gauge])
 
   const totalStitches = useMemo(
-    () => figure.parts.reduce((sum, p) => sum + partPattern(p).total * p.count, 0),
-    [figure.parts],
+    () => figure.parts.reduce((sum, p) => sum + partPattern(p, gauge).total * p.count, 0),
+    [figure.parts, gauge],
   )
 
   const unitLabel = unit === 'in' ? 'in' : 'cm'
@@ -211,7 +208,7 @@ export default function Amigurumi() {
             </p>
             <div className="space-y-5">
               {figure.parts.map((part) => {
-                const pat = partPattern(part)
+                const pat = partPattern(part, gauge)
                 return (
                   <div key={part.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
                     <div className="mb-2 flex items-center gap-2">
@@ -265,7 +262,7 @@ export default function Amigurumi() {
                   >
                     <span className="inline-block h-4 w-4 rounded-full border border-slate-300" style={{ background: part.color }} />
                     <span className="font-medium text-slate-700">{part.name}</span>
-                    <span className="ml-auto text-xs text-slate-400">{part.shape.kind}{part.count > 1 ? ` ×${part.count}` : ''}</span>
+                    <span className="ml-auto text-xs text-slate-400">{part.shape.maxStitches} sts{part.count > 1 ? ` ×${part.count}` : ''}</span>
                   </button>
                 </li>
               ))}
@@ -288,39 +285,12 @@ export default function Amigurumi() {
                     className="w-full rounded-md border border-slate-300 px-3 py-1.5"
                   />
                 </Field>
-                <Field label="Shape">
-                  <select
-                    value={selected.shape.kind}
-                    onChange={(e) => updateShape(selected.id, { kind: e.target.value as ShapeKind })}
-                    className="w-full rounded-md border border-slate-300 px-3 py-1.5"
-                  >
-                    {SHAPES.map((s) => (
-                      <option key={s.kind} value={s.kind}>{s.label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Start sts (magic ring)">
-                    <NumberInput value={selected.shape.start} min={3} max={12} onChange={(v) => updateShape(selected.id, { start: v })} />
-                  </Field>
-                  <Field label="Widest sts">
-                    <NumberInput value={selected.shape.maxStitches} min={selected.shape.start} max={120} onChange={(v) => updateShape(selected.id, { maxStitches: v })} />
-                  </Field>
-                  <Field label="Even rounds">
-                    <NumberInput value={selected.shape.evenRounds} min={0} max={60} onChange={(v) => updateShape(selected.id, { evenRounds: v })} />
-                  </Field>
-                  <Field label="Make (count)">
-                    <NumberInput value={selected.count} min={1} max={8} onChange={(v) => updatePart(selected.id, { count: v })} />
-                  </Field>
-                </div>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.shape.closed}
-                    onChange={(e) => updateShape(selected.id, { closed: e.target.checked })}
-                  />
-                  <span className="text-slate-600">Closed (decrease &amp; stuff) — uncheck for an open tube</span>
-                </label>
+                <ShapeControls
+                  shape={selected.shape}
+                  gauge={gauge}
+                  unit={unit}
+                  onShape={(patch) => updateShape(selected.id, patch)}
+                />
                 <Field label="Color">
                   <input
                     type="color"
@@ -377,6 +347,116 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="text-lg font-semibold text-slate-800">{value}</div>
       <div className="text-xs text-slate-500">{label}</div>
     </div>
+  )
+}
+
+function ShapeControls({
+  shape,
+  gauge,
+  unit,
+  onShape,
+}: {
+  shape: ShapeParams
+  gauge: Gauge
+  unit: Unit
+  onShape: (patch: Partial<ShapeParams>) => void
+}) {
+  const unitLabel = unit === 'in' ? 'in' : 'cm'
+  const committedDia = fromInches(diameterFromWidest(shape.maxStitches, gauge), unit)
+
+  // Widest sts and diameter are two views of the same value — edit either one.
+  // Each field keeps its own text state so it can be typed into freely (no
+  // per-keystroke clamping); editing one updates the other live. We only
+  // re-sync both from the model when the value/unit changes elsewhere
+  // (e.g. loading a preset).
+  const [widestText, setWidestText] = useState(() => String(shape.maxStitches))
+  const [diaText, setDiaText] = useState(() => committedDia.toFixed(2))
+  const syncRef = useRef({ widest: shape.maxStitches, unit })
+  useEffect(() => {
+    const s = syncRef.current
+    if (s.widest !== shape.maxStitches || s.unit !== unit) {
+      syncRef.current = { widest: shape.maxStitches, unit }
+      setWidestText(String(shape.maxStitches))
+      setDiaText(committedDia.toFixed(2))
+    }
+  }, [shape.maxStitches, unit, committedDia])
+
+  function commitWidest(w: number) {
+    syncRef.current = { widest: w, unit }
+    onShape({ maxStitches: w })
+  }
+
+  function onWidest(text: string) {
+    setWidestText(text)
+    const v = parseInt(text, 10)
+    if (Number.isFinite(v) && v >= shape.start) {
+      setDiaText(fromInches(diameterFromWidest(v, gauge), unit).toFixed(2))
+      commitWidest(v)
+    }
+  }
+
+  function onDiameter(text: string) {
+    setDiaText(text)
+    const v = parseFloat(text)
+    if (Number.isFinite(v) && v > 0) {
+      const w = widestFromDiameter(toInches(v, unit), gauge)
+      setWidestText(String(w))
+      commitWidest(w)
+    }
+  }
+
+  return (
+    <>
+      <Field label="Start sts (magic ring)">
+        <NumberInput value={shape.start} min={3} max={12} onChange={(v) => onShape({ start: v })} />
+      </Field>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Size — edit either widest count or diameter</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Widest sts">
+          <input
+            type="number"
+            value={widestText}
+            min={shape.start}
+            step={1}
+            onChange={(e) => onWidest(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5"
+          />
+        </Field>
+        <Field label={`Diameter (${unitLabel})`}>
+          <input
+            type="number"
+            value={diaText}
+            min={0}
+            step={0.1}
+            onChange={(e) => onDiameter(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5"
+          />
+        </Field>
+      </div>
+      <p className="text-[11px] text-slate-400">
+        Diameter → circumference (π × diameter) ÷ single-crochet width = widest sts. At this gauge,{' '}
+        {shape.maxStitches} sts ≈ {committedDia.toFixed(2)} {unitLabel} across.
+      </p>
+      <Field label={`Oval / elongation: ${shape.oval.toFixed(1)}× (1 = round, >1 = egg)`}>
+        <input
+          type="range"
+          min={1}
+          max={2.5}
+          step={0.1}
+          value={Math.max(1, shape.oval)}
+          onChange={(e) => onShape({ oval: num(e.target.value, 1) })}
+          className="w-full"
+        />
+      </Field>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={shape.closed}
+          onChange={(e) => onShape({ closed: e.target.checked })}
+        />
+        <span className="text-slate-600">Closed (decrease &amp; stuff) — uncheck for an open bowl</span>
+      </label>
+    </>
   )
 }
 

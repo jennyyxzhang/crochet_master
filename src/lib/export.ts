@@ -150,7 +150,7 @@ export function amigurumiText(fig: Figure): string {
   lines.push('')
 
   fig.parts.forEach((part, i) => {
-    const pat = partPattern(part)
+    const pat = partPattern(part, fig.gauge)
     const make = pat.count > 1 ? ` — make ${pat.count}` : ''
     lines.push(`${i + 1}. ${pat.name}${make}  [${pat.color.toUpperCase()}]`)
     for (const ins of pat.instructions) lines.push(`   ${ins}`)
@@ -233,7 +233,7 @@ export function exportAmigurumiPDF(fig: Figure): void {
   )
 
   fig.parts.forEach((part, i) => {
-    const pat = partPattern(part)
+    const pat = partPattern(part, fig.gauge)
     const make = pat.count > 1 ? `  (make ${pat.count})` : ''
     write(`${i + 1}. ${pat.name}${make}`, 14, { bold: true, gap: 2 })
     for (const ins of pat.instructions) write(ins, 10)

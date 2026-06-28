@@ -167,6 +167,25 @@ export function cellAspect(gauge: Gauge): number {
   return cellWidth / cellHeight
 }
 
+/** Width of a single crochet stitch (in inches) for a gauge. */
+export function stitchWidthIn(gauge: Gauge): number {
+  return SWATCH_INCHES / gauge.stsPer4in
+}
+
+/**
+ * Widest round stitch count needed for a target ball diameter (inches).
+ * A round of N stitches has circumference N·stitchWidth and diameter
+ * (N·stitchWidth)/π, so N = π·diameter / stitchWidth.
+ */
+export function widestFromDiameter(diameterIn: number, gauge: Gauge): number {
+  return Math.max(3, Math.round((Math.PI * diameterIn) / stitchWidthIn(gauge)))
+}
+
+/** Ball diameter (inches) produced by a widest round of `widest` stitches. */
+export function diameterFromWidest(widest: number, gauge: Gauge): number {
+  return (widest * stitchWidthIn(gauge)) / Math.PI
+}
+
 /**
  * Very rough yardage estimate. Yarn use depends heavily on tension and stitch
  * type, so this is clearly labelled as an approximation in the UI.

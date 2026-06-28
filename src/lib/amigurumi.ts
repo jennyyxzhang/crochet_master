@@ -1,4 +1,4 @@
-import type { Gauge } from './gauge'
+import { cellAspect, type Gauge } from './gauge'
 
 // Amigurumi (worked-in-the-round) shape math.
 //
@@ -7,22 +7,26 @@ import type { Gauge } from './gauge'
 // end. The 3D form comes from revolving that profile around the vertical axis —
 // the radius of each round is proportional to its stitch count.
 //
+// Every piece is a ball: a surface of revolution whose meridian is a circular
+// arc (sphere) or an ellipse (oval). The stitch count of a round at vertical
+// position y is proportional to the horizontal radius there, radius = √(R²−y²),
+// so the increases taper toward the equator — that is what makes the rendered
+// form actually round instead of a cone. The `oval` aspect stretches the
+// vertical axis (1 = sphere, >1 = egg/elongated, <1 = squashed).
+//
 // Shaping between rounds is done with increases (inc = 2 sc in one stitch) and
 // invisible decreases (dec = 2 stitches worked together). We distribute those
 // changes as evenly as possible and describe them in standard amigurumi
 // notation, e.g. "*2 sc, inc* x6 (24)".
 
-export type ShapeKind = 'ball' | 'cylinder' | 'cone' | 'dome' | 'teardrop'
-
 export interface ShapeParams {
-  kind: ShapeKind
   /** stitches in the start magic ring (typically 6) */
   start: number
-  /** widest round's stitch count (must be reachable from start by +start/round) */
+  /** widest round's stitch count (the equator) */
   maxStitches: number
-  /** straight rounds worked even at the widest point (cylinder body / teardrop) */
-  evenRounds: number
-  /** whether the piece is closed at the end (stuffed) or left open (e.g. a limb) */
+  /** vertical aspect: 1 = sphere, >1 = elongated oval/egg, <1 = squashed */
+  oval: number
+  /** whether the piece is closed at the top (full ball) or left open (half/bowl) */
   closed: boolean
 }
 
@@ -55,47 +59,58 @@ export interface Round {
 export const DEFAULT_START = 6
 
 /**
- * Generate the stitch-count profile (one entry per round) for a shape.
+ * Generate the stitch-count profile (one entry per round) for a ball/oval.
  *
- * The growth phase increases by `start` stitches per round (the classic flat
- * circle rule that keeps the disc flat), reaching `maxStitches`. Depending on
- * the shape we then work even and/or mirror the growth as a decrease phase.
+ * The meridian is an ellipse: horizontal radius peaks at `maxStitches` (the
+ * equator) and the vertical radius is `oval` times that. Rounds are stacked at
+ * equal vertical spacing (one row height each), so the number of rounds from
+ * pole to equator is the vertical radius divided by the row height — which is
+ * why the gauge's cell `aspect` (stitch-width / row-height) is needed for the
+ * rendered form to be proportionate.
+ *
+ * At each round the target stitch count follows the arc, count = peak·√(1−f²)
+ * where f is the fraction of the vertical radius from the equator. Counts are
+ * snapped to a non-decreasing, achievable sequence (each round increases by at
+ * most a doubling, the most a single round of increases can do).
  */
-export function shapeProfile(shape: ShapeParams): number[] {
+export function shapeProfile(shape: ShapeParams, aspect = 1): number[] {
   const start = Math.max(3, Math.round(shape.start))
-  const step = start
-  const peak = Math.max(start, roundToStep(shape.maxStitches, step, start))
-  const growth: number[] = []
-  for (let s = start; s <= peak; s += step) growth.push(s)
+  const peak = Math.max(start, Math.round(shape.maxStitches))
+  const oval = Math.max(0.2, shape.oval || 1)
 
-  const even: number[] = Array.from({ length: Math.max(0, Math.round(shape.evenRounds)) }, () => peak)
-  const decrease = growth.slice(0, -1).reverse() // mirror, excluding the peak (already counted)
-  const closing = shape.closed ? [start] : []
-
-  switch (shape.kind) {
-    case 'cone':
-      // Linear taper to a point: grow only, optional even rounds at the base.
-      return [...growth, ...even]
-    case 'dome':
-      // Half a ball: grow to the equator, then optional even rounds.
-      return [...growth, ...even]
-    case 'cylinder':
-      // Grow a base, long even tube, optional closed top.
-      return [...growth, ...even, ...(shape.closed ? [...decrease, ...closing] : [])]
-    case 'teardrop':
-      // Ball with an elongated straight midsection.
-      return [...growth, ...even, ...decrease, ...closing]
-    case 'ball':
-    default:
-      // Sphere: symmetric grow / (optional even) / shrink.
-      return [...growth, ...even, ...decrease, ...closing]
+  if (peak <= start) {
+    return shape.closed ? [start, start] : [start]
   }
-}
 
-/** Round a target up/down to the nearest achievable stitch count for the step. */
-function roundToStep(target: number, step: number, start: number): number {
-  const rounds = Math.max(1, Math.round((target - start) / step) + 1)
-  return start + (rounds - 1) * step
+  // Rounds from pole to equator = vertical radius / row height.
+  // Horizontal radius R = peak/(2π) (in stitch-width units); vertical radius is
+  // R·oval; row height in stitch-width units is 1/aspect. So the count is
+  // (peak/(2π))·oval·aspect.
+  const halfRounds = Math.max(2, Math.round((peak / (2 * Math.PI)) * oval * Math.max(0.2, aspect)))
+
+  const arc = (f: number) => peak * Math.sqrt(Math.max(0, 1 - f * f))
+
+  // Growth half: bottom pole (magic ring) → equator, one entry per round.
+  const growth: number[] = [start]
+  for (let i = 1; i < halfRounds; i++) {
+    const f = (halfRounds - 1 - i) / (halfRounds - 1) // 1 near pole → 0 at equator
+    const prev = growth[growth.length - 1]
+    let next = Math.round(arc(f))
+    next = Math.max(prev, Math.min(peak, next)) // non-decreasing, capped at peak
+    next = Math.min(next, prev * 2) // an inc round can at most double the count
+    growth.push(next)
+  }
+  growth[growth.length - 1] = peak // the last growth round is the equator
+
+  if (!shape.closed) {
+    // Open piece (e.g. an ear / bowl): rounded bottom, open at the widest ring.
+    return growth
+  }
+
+  // Closed piece: mirror the growth as a decrease back to the magic ring. Each
+  // dec round removes at most half the stitches, guaranteed by the doubling cap.
+  const decrease = growth.slice(0, -1).reverse()
+  return [...growth, ...decrease]
 }
 
 export function profileToRounds(profile: number[]): Round[] {
@@ -111,6 +126,75 @@ export function totalStitches(profile: number[]): number {
 }
 
 /**
+ * A repeated group within a round, e.g. `*2 sc, inc* x6`: `plain` plain single
+ * crochets followed by one shaping stitch (`op`), repeated `times` times.
+ */
+export interface RoundSegment {
+  /** plain sc worked before the shaping stitch in each repeat */
+  plain: number
+  /** shaping stitch at the end of each repeat, or null for plain-only */
+  op: 'inc' | 'dec' | null
+  /** how many times the group repeats */
+  times: number
+}
+
+/** Stitches a segment consumes from the previous round. */
+function segmentConsumed(seg: RoundSegment): number {
+  const opConsumed = seg.op === 'inc' ? 1 : seg.op === 'dec' ? 2 : 0
+  return seg.times * (seg.plain + opConsumed)
+}
+
+/** New stitches a segment produces in this round. */
+function segmentProduced(seg: RoundSegment): number {
+  const opProduced = seg.op === 'inc' ? 2 : seg.op === 'dec' ? 1 : 0
+  return seg.times * (seg.plain + opProduced)
+}
+
+/** Total stitches a plan consumes from the previous round. */
+export function planConsumed(plan: RoundSegment[]): number {
+  return plan.reduce((sum, seg) => sum + segmentConsumed(seg), 0)
+}
+
+/** Total stitches a plan produces (should equal the round's stitch count). */
+export function planProduced(plan: RoundSegment[]): number {
+  return plan.reduce((sum, seg) => sum + segmentProduced(seg), 0)
+}
+
+/**
+ * Break a round into evenly distributed repeat groups, given the previous
+ * round's stitch count. The magic-ring round (index 1) and even rounds have no
+ * shaping. Increases/decreases are spread as evenly as possible; when they
+ * don't divide evenly the round is split into two repeat groups so the totals
+ * still work out (1 unit per stitch).
+ */
+export function roundPlan(round: Round, prevStitches: number): RoundSegment[] {
+  if (round.index === 1) {
+    return [{ plain: round.stitches, op: null, times: 1 }]
+  }
+  if (round.delta === 0) {
+    return [{ plain: prevStitches, op: null, times: 1 }]
+  }
+  const isInc = round.delta > 0
+  const op: 'inc' | 'dec' = isInc ? 'inc' : 'dec'
+  const changes = Math.abs(round.delta)
+  const consumed = isInc ? 1 : 2 // stitches each shaping element consumes
+  const plain = prevStitches - changes * consumed
+  const groups = changes
+  const baseEach = Math.floor(plain / groups)
+  const remainder = plain - baseEach * groups
+
+  if (remainder === 0) {
+    return [{ plain: baseEach, op, times: groups }]
+  }
+  // `remainder` groups carry one extra plain stitch; the rest carry baseEach.
+  const small = groups - remainder
+  const segments: RoundSegment[] = []
+  if (small > 0) segments.push({ plain: baseEach, op, times: small })
+  if (remainder > 0) segments.push({ plain: baseEach + 1, op, times: remainder })
+  return segments
+}
+
+/**
  * Human-readable instruction for a single round, given the previous round's
  * stitch count. Uses standard amigurumi shorthand.
  */
@@ -121,46 +205,17 @@ export function roundInstruction(round: Round, prevStitches: number): string {
   if (round.delta === 0) {
     return `sc in each st around (${round.stitches})`
   }
-  if (round.delta > 0) {
-    return `${distribute('inc', round.delta, prevStitches, true)} (${round.stitches})`
-  }
-  return `${distribute('dec', -round.delta, prevStitches, false)} (${round.stitches})`
+  const body = roundPlan(round, prevStitches).map(formatSegment).join(', ')
+  return `${body} (${round.stitches})`
 }
 
-/**
- * Distribute `changes` increases/decreases evenly across a round of
- * `prevStitches` stitches and format the repeat instruction.
- *
- * For increases: each repeat is (k sc, inc) over k+1 base stitches.
- * For decreases: each repeat is (k sc, dec) over k+2 base stitches.
- */
-function distribute(kind: 'inc' | 'dec', changes: number, prevStitches: number, isInc: boolean): string {
-  // stitches consumed by each shaping element from the previous round
-  const consumed = isInc ? 1 : 2
-  const plain = prevStitches - changes * consumed
-  const groups = changes
-  const baseEach = Math.floor(plain / groups)
-  const remainder = plain - baseEach * groups
-
-  // When evenly divisible, one tidy repeat; otherwise split into two repeats so
-  // the count still works out (common in real patterns).
-  const op = kind
-  if (remainder === 0) {
-    const lead = baseEach > 0 ? `${baseEach} sc, ` : ''
-    return repeat(`${lead}${op}`, groups)
+function formatSegment(seg: RoundSegment): string {
+  const lead = seg.plain > 0 ? `${seg.plain} sc, ` : ''
+  const body = `${lead}${seg.op ?? 'sc'}`
+  if (seg.times === 1) {
+    return body.includes(',') ? body.replace(/,\s*(inc|dec)$/, ' $1') : body
   }
-  // groups with one extra plain stitch vs. the rest
-  const big = remainder
-  const small = groups - remainder
-  const parts: string[] = []
-  if (small > 0) parts.push(repeat(`${baseEach > 0 ? `${baseEach} sc, ` : ''}${op}`, small))
-  if (big > 0) parts.push(repeat(`${baseEach + 1} sc, ${op}`, big))
-  return parts.join(', ')
-}
-
-function repeat(body: string, times: number): string {
-  if (times === 1) return body.includes(',') ? body.replace(/,\s*(inc|dec)$/, ' $1') : body
-  return `*${body}* x${times}`
+  return `*${body}* x${seg.times}`
 }
 
 export interface PartPattern {
@@ -172,8 +227,8 @@ export interface PartPattern {
   total: number
 }
 
-export function partPattern(part: AmiPart): PartPattern {
-  const profile = shapeProfile(part.shape)
+export function partPattern(part: AmiPart, gauge: Gauge): PartPattern {
+  const profile = shapeProfile(part.shape, cellAspect(gauge))
   const rounds = profileToRounds(profile)
   const instructions = rounds.map((r, i) =>
     `Rnd ${r.index}: ${roundInstruction(r, i === 0 ? 0 : profile[i - 1])}`,
@@ -222,7 +277,7 @@ export function newPart(id: string, name: string, overrides: Partial<AmiPart> = 
     count: 1,
     position: { x: 0, y: 0, z: 0 },
     scale: 1,
-    shape: { kind: 'ball', start: DEFAULT_START, maxStitches: 30, evenRounds: 4, closed: true },
+    shape: { start: DEFAULT_START, maxStitches: 30, oval: 1, closed: true },
     ...overrides,
   }
 }
@@ -244,8 +299,8 @@ export function partId(): string {
 }
 
 /** Total height of a part (in stitch-row units) from its profile length. */
-export function partHeight(shape: ShapeParams): number {
-  return shapeProfile(shape).length
+export function partHeight(shape: ShapeParams, aspect = 1): number {
+  return shapeProfile(shape, aspect).length
 }
 
 // ----- presets -----
@@ -280,7 +335,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 0, z: 0 },
         scale: 1,
-        shape: { kind: 'ball', start: 6, maxStitches: 36, evenRounds: 6, closed: true },
+        shape: { start: 6, maxStitches: 36, oval: 1, closed: true },
       },
     ],
   },
@@ -295,7 +350,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 0, z: 0 },
         scale: 1,
-        shape: { kind: 'teardrop', start: 6, maxStitches: 36, evenRounds: 6, closed: true },
+        shape: { start: 6, maxStitches: 36, oval: 1.4, closed: true },
       },
       {
         name: 'Head',
@@ -303,7 +358,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 13, z: 0 },
         scale: 1,
-        shape: { kind: 'ball', start: 6, maxStitches: 42, evenRounds: 6, closed: true },
+        shape: { start: 6, maxStitches: 42, oval: 1, closed: true },
       },
       {
         name: 'Ear',
@@ -311,7 +366,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 2,
         position: { x: 3.2, y: 19, z: 0 },
         scale: 1,
-        shape: { kind: 'dome', start: 6, maxStitches: 18, evenRounds: 0, closed: true },
+        shape: { start: 6, maxStitches: 18, oval: 1, closed: true },
       },
       {
         name: 'Arm',
@@ -319,7 +374,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 2,
         position: { x: 4, y: 4, z: 0.5 },
         scale: 1,
-        shape: { kind: 'cylinder', start: 6, maxStitches: 12, evenRounds: 7, closed: true },
+        shape: { start: 6, maxStitches: 12, oval: 2.8, closed: true },
       },
       {
         name: 'Leg',
@@ -327,7 +382,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 2,
         position: { x: 2.4, y: -3, z: 1 },
         scale: 1,
-        shape: { kind: 'cylinder', start: 6, maxStitches: 18, evenRounds: 6, closed: true },
+        shape: { start: 6, maxStitches: 18, oval: 2, closed: true },
       },
       {
         name: 'Muzzle',
@@ -335,7 +390,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 12, z: 4 },
         scale: 1,
-        shape: { kind: 'dome', start: 6, maxStitches: 18, evenRounds: 1, closed: true },
+        shape: { start: 6, maxStitches: 18, oval: 1, closed: true },
       },
     ],
   },
@@ -350,7 +405,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 0, z: 0 },
         scale: 1,
-        shape: { kind: 'teardrop', start: 6, maxStitches: 30, evenRounds: 8, closed: true },
+        shape: { start: 6, maxStitches: 30, oval: 1.6, closed: true },
       },
       {
         name: 'Head',
@@ -358,7 +413,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 12, z: 0 },
         scale: 1,
-        shape: { kind: 'ball', start: 6, maxStitches: 36, evenRounds: 5, closed: true },
+        shape: { start: 6, maxStitches: 36, oval: 1, closed: true },
       },
       {
         name: 'Ear',
@@ -366,7 +421,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 2,
         position: { x: 2.6, y: 22, z: 0 },
         scale: 1,
-        shape: { kind: 'cylinder', start: 6, maxStitches: 12, evenRounds: 9, closed: true },
+        shape: { start: 6, maxStitches: 12, oval: 3.2, closed: true },
       },
       {
         name: 'Foot',
@@ -374,7 +429,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 2,
         position: { x: 2.4, y: -3, z: 1.5 },
         scale: 1,
-        shape: { kind: 'ball', start: 6, maxStitches: 18, evenRounds: 2, closed: true },
+        shape: { start: 6, maxStitches: 18, oval: 1.2, closed: true },
       },
     ],
   },
@@ -389,7 +444,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 0, z: 0 },
         scale: 1,
-        shape: { kind: 'ball', start: 6, maxStitches: 42, evenRounds: 4, closed: true },
+        shape: { start: 6, maxStitches: 42, oval: 1, closed: true },
       },
       {
         name: 'Middle',
@@ -397,7 +452,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 13, z: 0 },
         scale: 1,
-        shape: { kind: 'ball', start: 6, maxStitches: 30, evenRounds: 3, closed: true },
+        shape: { start: 6, maxStitches: 30, oval: 1, closed: true },
       },
       {
         name: 'Head',
@@ -405,7 +460,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 22, z: 0 },
         scale: 1,
-        shape: { kind: 'ball', start: 6, maxStitches: 24, evenRounds: 2, closed: true },
+        shape: { start: 6, maxStitches: 24, oval: 1, closed: true },
       },
       {
         name: 'Nose',
@@ -413,7 +468,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 22, z: 3.5 },
         scale: 1,
-        shape: { kind: 'cone', start: 4, maxStitches: 10, evenRounds: 0, closed: false },
+        shape: { start: 4, maxStitches: 10, oval: 1.8, closed: false },
       },
     ],
   },
