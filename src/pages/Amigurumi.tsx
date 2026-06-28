@@ -440,10 +440,10 @@ function ShapeControls({
       <Field label={`Oval / elongation: ${shape.oval.toFixed(1)}× (1 = round, >1 = egg)`}>
         <input
           type="range"
-          min={0.5}
+          min={1}
           max={2.5}
           step={0.1}
-          value={shape.oval}
+          value={Math.max(1, shape.oval)}
           onChange={(e) => onShape({ oval: num(e.target.value, 1) })}
           className="w-full"
         />

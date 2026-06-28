@@ -390,7 +390,7 @@ export const FIGURE_PRESETS: FigurePreset[] = [
         count: 1,
         position: { x: 0, y: 12, z: 4 },
         scale: 1,
-        shape: { start: 6, maxStitches: 18, oval: 0.8, closed: true },
+        shape: { start: 6, maxStitches: 18, oval: 1, closed: true },
       },
     ],
   },
