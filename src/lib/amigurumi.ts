@@ -126,6 +126,75 @@ export function totalStitches(profile: number[]): number {
 }
 
 /**
+ * A repeated group within a round, e.g. `*2 sc, inc* x6`: `plain` plain single
+ * crochets followed by one shaping stitch (`op`), repeated `times` times.
+ */
+export interface RoundSegment {
+  /** plain sc worked before the shaping stitch in each repeat */
+  plain: number
+  /** shaping stitch at the end of each repeat, or null for plain-only */
+  op: 'inc' | 'dec' | null
+  /** how many times the group repeats */
+  times: number
+}
+
+/** Stitches a segment consumes from the previous round. */
+function segmentConsumed(seg: RoundSegment): number {
+  const opConsumed = seg.op === 'inc' ? 1 : seg.op === 'dec' ? 2 : 0
+  return seg.times * (seg.plain + opConsumed)
+}
+
+/** New stitches a segment produces in this round. */
+function segmentProduced(seg: RoundSegment): number {
+  const opProduced = seg.op === 'inc' ? 2 : seg.op === 'dec' ? 1 : 0
+  return seg.times * (seg.plain + opProduced)
+}
+
+/** Total stitches a plan consumes from the previous round. */
+export function planConsumed(plan: RoundSegment[]): number {
+  return plan.reduce((sum, seg) => sum + segmentConsumed(seg), 0)
+}
+
+/** Total stitches a plan produces (should equal the round's stitch count). */
+export function planProduced(plan: RoundSegment[]): number {
+  return plan.reduce((sum, seg) => sum + segmentProduced(seg), 0)
+}
+
+/**
+ * Break a round into evenly distributed repeat groups, given the previous
+ * round's stitch count. The magic-ring round (index 1) and even rounds have no
+ * shaping. Increases/decreases are spread as evenly as possible; when they
+ * don't divide evenly the round is split into two repeat groups so the totals
+ * still work out (1 unit per stitch).
+ */
+export function roundPlan(round: Round, prevStitches: number): RoundSegment[] {
+  if (round.index === 1) {
+    return [{ plain: round.stitches, op: null, times: 1 }]
+  }
+  if (round.delta === 0) {
+    return [{ plain: prevStitches, op: null, times: 1 }]
+  }
+  const isInc = round.delta > 0
+  const op: 'inc' | 'dec' = isInc ? 'inc' : 'dec'
+  const changes = Math.abs(round.delta)
+  const consumed = isInc ? 1 : 2 // stitches each shaping element consumes
+  const plain = prevStitches - changes * consumed
+  const groups = changes
+  const baseEach = Math.floor(plain / groups)
+  const remainder = plain - baseEach * groups
+
+  if (remainder === 0) {
+    return [{ plain: baseEach, op, times: groups }]
+  }
+  // `remainder` groups carry one extra plain stitch; the rest carry baseEach.
+  const small = groups - remainder
+  const segments: RoundSegment[] = []
+  if (small > 0) segments.push({ plain: baseEach, op, times: small })
+  if (remainder > 0) segments.push({ plain: baseEach + 1, op, times: remainder })
+  return segments
+}
+
+/**
  * Human-readable instruction for a single round, given the previous round's
  * stitch count. Uses standard amigurumi shorthand.
  */
@@ -136,46 +205,17 @@ export function roundInstruction(round: Round, prevStitches: number): string {
   if (round.delta === 0) {
     return `sc in each st around (${round.stitches})`
   }
-  if (round.delta > 0) {
-    return `${distribute('inc', round.delta, prevStitches, true)} (${round.stitches})`
-  }
-  return `${distribute('dec', -round.delta, prevStitches, false)} (${round.stitches})`
+  const body = roundPlan(round, prevStitches).map(formatSegment).join(', ')
+  return `${body} (${round.stitches})`
 }
 
-/**
- * Distribute `changes` increases/decreases evenly across a round of
- * `prevStitches` stitches and format the repeat instruction.
- *
- * For increases: each repeat is (k sc, inc) over k+1 base stitches.
- * For decreases: each repeat is (k sc, dec) over k+2 base stitches.
- */
-function distribute(kind: 'inc' | 'dec', changes: number, prevStitches: number, isInc: boolean): string {
-  // stitches consumed by each shaping element from the previous round
-  const consumed = isInc ? 1 : 2
-  const plain = prevStitches - changes * consumed
-  const groups = changes
-  const baseEach = Math.floor(plain / groups)
-  const remainder = plain - baseEach * groups
-
-  // When evenly divisible, one tidy repeat; otherwise split into two repeats so
-  // the count still works out (common in real patterns).
-  const op = kind
-  if (remainder === 0) {
-    const lead = baseEach > 0 ? `${baseEach} sc, ` : ''
-    return repeat(`${lead}${op}`, groups)
+function formatSegment(seg: RoundSegment): string {
+  const lead = seg.plain > 0 ? `${seg.plain} sc, ` : ''
+  const body = `${lead}${seg.op ?? 'sc'}`
+  if (seg.times === 1) {
+    return body.includes(',') ? body.replace(/,\s*(inc|dec)$/, ' $1') : body
   }
-  // groups with one extra plain stitch vs. the rest
-  const big = remainder
-  const small = groups - remainder
-  const parts: string[] = []
-  if (small > 0) parts.push(repeat(`${baseEach > 0 ? `${baseEach} sc, ` : ''}${op}`, small))
-  if (big > 0) parts.push(repeat(`${baseEach + 1} sc, ${op}`, big))
-  return parts.join(', ')
-}
-
-function repeat(body: string, times: number): string {
-  if (times === 1) return body.includes(',') ? body.replace(/,\s*(inc|dec)$/, ' $1') : body
-  return `*${body}* x${times}`
+  return `*${body}* x${seg.times}`
 }
 
 export interface PartPattern {

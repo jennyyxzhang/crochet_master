@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import FigureViewer from '../components/FigureViewer'
 import {
   FIGURE_PRESETS,
@@ -287,11 +287,9 @@ export default function Amigurumi() {
                 </Field>
                 <ShapeControls
                   shape={selected.shape}
-                  count={selected.count}
                   gauge={gauge}
                   unit={unit}
                   onShape={(patch) => updateShape(selected.id, patch)}
-                  onCount={(v) => updatePart(selected.id, { count: v })}
                 />
                 <Field label="Color">
                   <input
@@ -354,31 +352,46 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function ShapeControls({
   shape,
-  count,
   gauge,
   unit,
   onShape,
-  onCount,
 }: {
   shape: ShapeParams
-  count: number
   gauge: Gauge
   unit: Unit
   onShape: (patch: Partial<ShapeParams>) => void
-  onCount: (v: number) => void
 }) {
   const unitLabel = unit === 'in' ? 'in' : 'cm'
-  const diameter = fromInches(diameterFromWidest(shape.maxStitches, gauge), unit)
+  const committedDia = fromInches(diameterFromWidest(shape.maxStitches, gauge), unit)
+
+  // The diameter field keeps its own text state so it can be typed into freely;
+  // it derives the widest stitch count as you type and only re-syncs from the
+  // model when the widest count or unit changes elsewhere (widest input, preset).
+  const [diaText, setDiaText] = useState(() => committedDia.toFixed(2))
+  const syncRef = useRef({ widest: shape.maxStitches, unit })
+  useEffect(() => {
+    const s = syncRef.current
+    if (s.widest !== shape.maxStitches || s.unit !== unit) {
+      syncRef.current = { widest: shape.maxStitches, unit }
+      setDiaText(committedDia.toFixed(2))
+    }
+  }, [shape.maxStitches, unit, committedDia])
+
+  function onDiameter(text: string) {
+    setDiaText(text)
+    const v = parseFloat(text)
+    if (Number.isFinite(v) && v > 0) {
+      const w = widestFromDiameter(toInches(v, unit), gauge)
+      syncRef.current = { widest: w, unit }
+      onShape({ maxStitches: w })
+    }
+  }
+
   return (
     <>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Start sts (magic ring)">
-          <NumberInput value={shape.start} min={3} max={12} onChange={(v) => onShape({ start: v })} />
-        </Field>
-        <Field label="Make (count)">
-          <NumberInput value={count} min={1} max={8} onChange={onCount} />
-        </Field>
-      </div>
+      <Field label="Start sts (magic ring)">
+        <NumberInput value={shape.start} min={3} max={12} onChange={(v) => onShape({ start: v })} />
+      </Field>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Size — set widest count or diameter</p>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Widest sts">
@@ -390,17 +403,19 @@ function ShapeControls({
           />
         </Field>
         <Field label={`Diameter (${unitLabel})`}>
-          <NumberInput
-            value={Number(diameter.toFixed(2))}
+          <input
+            type="number"
+            value={diaText}
             min={0}
             step={0.1}
-            onChange={(v) => onShape({ maxStitches: widestFromDiameter(toInches(v, unit), gauge) })}
+            onChange={(e) => onDiameter(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5"
           />
         </Field>
       </div>
       <p className="text-[11px] text-slate-400">
-        Widest = π × diameter ÷ single-crochet width. At this gauge, {shape.maxStitches} sts ≈{' '}
-        {diameter.toFixed(2)} {unitLabel} across.
+        Diameter → circumference (π × diameter) ÷ single-crochet width = widest sts. At this gauge,{' '}
+        {shape.maxStitches} sts ≈ {committedDia.toFixed(2)} {unitLabel} across.
       </p>
       <Field label={`Oval / elongation: ${shape.oval.toFixed(1)}× (1 = round, >1 = egg)`}>
         <input
